@@ -9,12 +9,57 @@ import { encryptData, decryptData } from './lib/crypto';
 
 type ViewMode = 'explorer' | 'extensions';
 
+const getLanguageByFilename = (filename: string): string => {
+  if (filename === '.env' || filename.endsWith('.env')) return 'ini';
+  if (filename.toLowerCase() === 'cargo.toml') return 'toml';
+  
+  const ext = filename.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'js':
+    case 'jsx':
+      return 'javascript';
+    case 'ts':
+    case 'tsx':
+      return 'typescript';
+    case 'html':
+      return 'html';
+    case 'css':
+      return 'css';
+    case 'json':
+      return 'json';
+    case 'md':
+      return 'markdown';
+    case 'py':
+      return 'python';
+    case 'sh':
+      return 'shell';
+    case 'yaml':
+    case 'yml':
+      return 'yaml';
+    case 'sql':
+      return 'sql';
+    case 'xml':
+      return 'xml';
+    case 'go':
+      return 'go';
+    case 'rs':
+      return 'rust';
+    case 'toml':
+      return 'toml';
+    case 'ini':
+      return 'ini';
+    default:
+      return 'plaintext';
+  }
+};
+
 function App() {
   const [code, setCode] = useState<string>('// Welcome to 7Coder Desktop\n// Open a folder in the Explorer to get started!');
   const [activeFile, setActiveFile] = useState<string>('Welcome');
   const [activeHandle, setActiveHandle] = useState<FileSystemFileHandle | null>(null);
   const [dirtyFiles, setDirtyFiles] = useState<Map<string, { handle: FileSystemFileHandle, content: string }>>(new Map());
   const [tabs, setTabs] = useState<{ name: string, handle: FileSystemFileHandle | null }[]>([]);
+  const [explorerRefreshTrigger, setExplorerRefreshTrigger] = useState(0);
   const [activeView, setActiveView] = useState<ViewMode>('explorer');
   const [rootHandle, setRootHandle] = useState<FileSystemDirectoryHandle | null>(null);
   
@@ -220,6 +265,10 @@ function App() {
     });
   };
 
+  const triggerExplorerRefresh = () => {
+    setExplorerRefreshTrigger(prev => prev + 1);
+  };
+
   return (
     <div className="flex h-screen w-screen bg-[#1e1e1e] text-[#cccccc] overflow-hidden">
       
@@ -270,13 +319,18 @@ function App() {
           {activeView === 'explorer' && (
             <div className="flex flex-col h-full">
               <div className="flex-1 overflow-hidden">
-                <Explorer onFileSelect={handleFileSelect} onRootLoaded={setRootHandle} />
+                <Explorer 
+                  onFileSelect={handleFileSelect} 
+                  onRootLoaded={setRootHandle} 
+                  refreshTrigger={explorerRefreshTrigger}
+                />
               </div>
               <AIHarness 
                 rootHandle={rootHandle} 
                 onFileEdit={handleFileSelect} 
                 tabs={tabs}
                 onCloseTab={closeTab}
+                onRefreshExplorer={triggerExplorerRefresh}
               />
             </div>
           )}
@@ -289,9 +343,29 @@ function App() {
       <div className="flex-1 flex flex-col min-w-0">
         <div className="h-10 bg-[#2d2d2d] flex items-center justify-between px-0 border-b border-black/20">
           <div className="flex items-center h-full overflow-x-auto whitespace-nowrap scrollbar-hide">
-            <div className="px-4 py-2 h-full bg-[#1e1e1e] text-[12px] font-medium border-t-2 border-blue-500 cursor-pointer flex items-center">
-              {activeFile}
-            </div>
+            {tabs.map((tab, idx) => (
+              <div 
+                key={`${tab.name}-${idx}`}
+                onClick={() => tab.handle ? handleFileSelect(tab.handle) : setActiveFile(tab.name)}
+                className={`px-4 py-2 h-full text-[12px] font-medium border-r border-black/10 cursor-pointer flex items-center group transition-colors ${activeFile === tab.name ? 'bg-[#1e1e1e] border-t-2 border-blue-500 text-white' : 'bg-[#2d2d2d] text-gray-500 hover:bg-[#323233] hover:text-gray-300'}`}
+              >
+                <span className="truncate max-w-[120px]">{tab.name}</span>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeTab(idx);
+                  }}
+                  className={`ml-2 p-0.5 rounded-sm hover:bg-[#454545] transition-opacity ${activeFile === tab.name ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                >
+                  <span className="w-3 h-3 flex items-center justify-center text-[10px]">✕</span>
+                </button>
+              </div>
+            ))}
+            {tabs.length === 0 && (
+              <div className="px-4 py-2 h-full bg-[#1e1e1e] text-[12px] font-medium border-t-2 border-blue-500 cursor-pointer flex items-center">
+                {activeFile}
+              </div>
+            )}
           </div>
           
           <div className="flex items-center px-4 space-x-2">
@@ -319,7 +393,7 @@ function App() {
         <div className="flex-1 bg-[#1e1e1e] relative">
           <Editor
             height="100%"
-            defaultLanguage="typescript"
+            language={getLanguageByFilename(activeFile)}
             theme="vs-dark"
             value={code}
             onChange={handleCodeChange}

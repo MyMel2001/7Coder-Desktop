@@ -13,12 +13,19 @@ interface FileNode {
 interface ExplorerProps {
   onFileSelect: (fileHandle: FileSystemFileHandle | File) => void;
   onRootLoaded: (handle: FileSystemDirectoryHandle) => void;
+  refreshTrigger?: number;
 }
 
-export function Explorer({ onFileSelect, onRootLoaded }: ExplorerProps) {
+export function Explorer({ onFileSelect, onRootLoaded, refreshTrigger }: ExplorerProps) {
   const [rootNode, setRootNode] = useState<FileNode | null>(null);
   const [isFileSystemSupported] = useState('showDirectoryPicker' in window);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (rootNode && isFileSystemSupported) {
+      loadDirectory(rootNode).then(() => setRootNode({ ...rootNode }));
+    }
+  }, [refreshTrigger]);
 
   const createNewFile = async () => {
     if (!rootNode?.handle || rootNode.kind !== 'directory') return;

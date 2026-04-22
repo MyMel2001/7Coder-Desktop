@@ -16,9 +16,10 @@ interface AIHarnessProps {
   onFileEdit: (handle: FileSystemFileHandle) => void;
   tabs: { name: string, handle: FileSystemFileHandle | null }[];
   onCloseTab: (index: number) => void;
+  onRefreshExplorer: () => void;
 }
 
-export function AIHarness({ rootHandle, onFileEdit, tabs, onCloseTab }: AIHarnessProps) {
+export function AIHarness({ rootHandle, onFileEdit, tabs, onCloseTab, onRefreshExplorer }: AIHarnessProps) {
   const [mode, setMode] = useState<Mode>('chat');
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: "Hello! I am your 7Coder Agent. I can now read and edit your workspace autonomously. How can I assist you today?" }
@@ -92,6 +93,7 @@ export function AIHarness({ rootHandle, onFileEdit, tabs, onCloseTab }: AIHarnes
       await writable.write(content);
       await writable.close();
       onFileEdit(fileHandle); // Update editor
+      onRefreshExplorer(); // Update explorer
       return `Successfully wrote to ${filename}`;
     } catch (err: any) {
       return `Error writing to file ${filename}: ${err.message}`;
@@ -215,6 +217,18 @@ Supports: | (pipe), > (redirect to file), < (read from file)`;
           const name = tabs[id].name;
           onCloseTab(id);
           return `Closed tab ${id} (${name})`;
+        }
+
+        case 'rm': {
+          if (!args[0]) return "Usage: rm <filename>";
+          if (!rootHandle) return "No workspace opened.";
+          try {
+            await rootHandle.removeEntry(args[0]);
+            onRefreshExplorer();
+            return `Removed ${args[0]}`;
+          } catch (err: any) {
+            return `Error removing ${args[0]}: ${err.message}`;
+          }
         }
 
         case 'pids':
