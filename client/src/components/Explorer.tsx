@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { FolderOpen, File as FileIcon, ChevronRight, ChevronDown, AlertCircle } from 'lucide-react';
+import { FolderOpen, File as FileIcon, ChevronRight, ChevronDown, AlertCircle, Plus } from 'lucide-react';
 
 interface FileNode {
   name: string;
@@ -19,6 +19,23 @@ export function Explorer({ onFileSelect }: ExplorerProps) {
   const [rootNode, setRootNode] = useState<FileNode | null>(null);
   const [isFileSystemSupported] = useState('showDirectoryPicker' in window);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const createNewFile = async () => {
+    if (!rootNode?.handle || rootNode.kind !== 'directory') return;
+    const fileName = prompt('Enter file name:');
+    if (!fileName) return;
+
+    try {
+      const dirHandle = rootNode.handle as FileSystemDirectoryHandle;
+      await dirHandle.getFileHandle(fileName, { create: true });
+      
+      // Refresh the root directory
+      await loadDirectory(rootNode);
+      setRootNode({ ...rootNode });
+    } catch (err) {
+      console.error('Failed to create file:', err);
+    }
+  };
 
   const openFolder = async () => {
     if (isFileSystemSupported) {
@@ -127,6 +144,15 @@ export function Explorer({ onFileSelect }: ExplorerProps) {
     <div className="flex flex-col h-full bg-[#252526]">
       <div className="p-3 flex justify-between items-center border-b border-[#333333]">
         <h2 className="text-[10px] uppercase tracking-wider text-gray-500 font-bold px-1">Explorer</h2>
+        {rootNode && (
+          <button 
+            onClick={createNewFile}
+            className="p-1 hover:bg-[#333333] rounded text-gray-400 hover:text-white transition-colors"
+            title="New File"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        )}
       </div>
       
       <div className="flex-1 overflow-y-auto">

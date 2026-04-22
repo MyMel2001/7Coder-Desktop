@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
-import { Files, Blocks, User, ShieldCheck } from 'lucide-react';
+import { Files, Blocks, User, ShieldCheck, Save } from 'lucide-react';
 import { Extensions } from './components/Extensions';
 import { Explorer } from './components/Explorer';
 import { AIHarness } from './components/AIHarness';
@@ -12,6 +12,8 @@ type ViewMode = 'explorer' | 'extensions';
 function App() {
   const [code, setCode] = useState<string>('// Welcome to 7Coder Desktop\n// Open a folder in the Explorer to get started!');
   const [activeFile, setActiveFile] = useState<string>('Welcome');
+  const [activeHandle, setActiveHandle] = useState<FileSystemFileHandle | null>(null);
+  const [dirtyFiles, setDirtyFiles] = useState<Map<string, { handle: FileSystemFileHandle, content: string }>>(new Map());
   const [activeView, setActiveView] = useState<ViewMode>('explorer');
   const [rootHandle, setRootHandle] = useState<FileSystemDirectoryHandle | null>(null);
   
@@ -106,6 +108,51 @@ function App() {
     sessionStorage.removeItem('7coder_pw');
   };
 
+  const saveFile = async () => {
+    if (!activeHandle) return;
+    try {
+      const writable = await activeHandle.createWritable();
+      await writable.write(code);
+      await writable.close();
+      
+      setDirtyFiles(prev => {
+        const next = new Map(prev);
+        next.delete(activeFile);
+        return next;
+      });
+      
+      console.log('File saved successfully');
+    } catch (err) {
+      console.error('Failed to save file:', err);
+    }
+  };
+
+  const saveAll = async () => {
+    try {
+      for (const [name, { handle, content }] of dirtyFiles.entries()) {
+        const writable = await handle.createWritable();
+        await writable.write(content);
+        await writable.close();
+        console.log(`Saved ${name}`);
+      }
+      setDirtyFiles(new Map());
+    } catch (err) {
+      console.error('Failed to save all files:', err);
+    }
+  };
+
+  const handleCodeChange = (value: string | undefined) => {
+    const newCode = value || '';
+    setCode(newCode);
+    if (activeHandle) {
+      setDirtyFiles(prev => {
+        const next = new Map(prev);
+        next.set(activeFile, { handle: activeHandle, content: newCode });
+        return next;
+      });
+    }
+  };
+
   const handleFileSelect = async (handle: FileSystemFileHandle | File) => {
     try {
       let content = '';
@@ -113,13 +160,24 @@ function App() {
       
       if ('getFile' in handle) {
         // FileSystemFileHandle (Chromium)
-        const file = await handle.getFile();
-        content = await file.text();
-        name = handle.name;
+        name = (handle as FileSystemFileHandle).name;
+        console.log('File selected (handle):', name);
+        
+        // Check if we have dirty (unsaved) content for this file
+        if (dirtyFiles.has(name)) {
+          content = dirtyFiles.get(name)!.content;
+        } else {
+          const file = await (handle as FileSystemFileHandle).getFile();
+          content = await file.text();
+        }
+        
+        setActiveHandle(handle as FileSystemFileHandle);
       } else {
         // File object (Safari Fallback)
-        content = await handle.text();
-        name = handle.name;
+        name = (handle as File).name;
+        console.log('File selected (File object):', name);
+        content = await (handle as File).text();
+        setActiveHandle(null);
       }
       
       setCode(content);
@@ -191,9 +249,32 @@ function App() {
 
       {/* Main Editor Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="h-9 bg-[#2d2d2d] flex items-center px-0 overflow-x-auto whitespace-nowrap scrollbar-hide border-b border-black/20">
-          <div className="px-4 py-1.5 h-full bg-[#1e1e1e] text-[12px] font-medium border-t-2 border-blue-500 cursor-pointer flex items-center">
-            {activeFile}
+        <div className="h-10 bg-[#2d2d2d] flex items-center justify-between px-0 border-b border-black/20">
+          <div className="flex items-center h-full overflow-x-auto whitespace-nowrap scrollbar-hide">
+            <div className="px-4 py-2 h-full bg-[#1e1e1e] text-[12px] font-medium border-t-2 border-blue-500 cursor-pointer flex items-center">
+              {activeFile}
+            </div>
+          </div>
+          
+          <div className="flex items-center px-4 space-x-2">
+            <button 
+              onClick={saveAll}
+              disabled={dirtyFiles.size === 0}
+              className={`flex items-center space-x-1.5 px-3 py-1 text-[11px] font-bold rounded transition-all border ${dirtyFiles.size > 0 ? 'bg-[#333333] hover:bg-[#444444] text-gray-300 border-[#444444] active:scale-95' : 'bg-transparent text-gray-700 border-gray-800/50 cursor-not-allowed opacity-40'}`}
+              title="Save All Files"
+            >
+              <span>Save All</span>
+              {dirtyFiles.size > 0 && <span className="bg-blue-600 text-white px-1.5 rounded-full text-[9px]">{dirtyFiles.size}</span>}
+            </button>
+            <button 
+              onClick={saveFile}
+              disabled={!activeHandle}
+              className={`flex items-center space-x-1.5 px-3 py-1 text-[11px] font-bold rounded transition-all shadow-lg ${activeHandle ? 'bg-blue-600 hover:bg-blue-500 text-white active:scale-95' : 'bg-gray-800 text-gray-500 cursor-not-allowed opacity-50'}`}
+              title="Save File"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>Save</span>
+            </button>
           </div>
         </div>
         
@@ -203,7 +284,7 @@ function App() {
             defaultLanguage="typescript"
             theme="vs-dark"
             value={code}
-            onChange={(value) => setCode(value || '')}
+            onChange={handleCodeChange}
             options={{
               minimap: { enabled: false },
               fontSize: 13,
