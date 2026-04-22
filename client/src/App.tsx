@@ -14,6 +14,7 @@ function App() {
   const [activeFile, setActiveFile] = useState<string>('Welcome');
   const [activeHandle, setActiveHandle] = useState<FileSystemFileHandle | null>(null);
   const [dirtyFiles, setDirtyFiles] = useState<Map<string, { handle: FileSystemFileHandle, content: string }>>(new Map());
+  const [tabs, setTabs] = useState<{ name: string, handle: FileSystemFileHandle | null }[]>([]);
   const [activeView, setActiveView] = useState<ViewMode>('explorer');
   const [rootHandle, setRootHandle] = useState<FileSystemDirectoryHandle | null>(null);
   
@@ -163,6 +164,12 @@ function App() {
         name = (handle as FileSystemFileHandle).name;
         console.log('File selected (handle):', name);
         
+        // Add to tabs if not present
+        setTabs(prev => {
+          if (prev.find(t => t.name === name)) return prev;
+          return [...prev, { name, handle: handle as FileSystemFileHandle }];
+        });
+        
         // Check if we have dirty (unsaved) content for this file
         if (dirtyFiles.has(name)) {
           content = dirtyFiles.get(name)!.content;
@@ -176,6 +183,12 @@ function App() {
         // File object (Safari Fallback)
         name = (handle as File).name;
         console.log('File selected (File object):', name);
+        
+        setTabs(prev => {
+          if (prev.find(t => t.name === name)) return prev;
+          return [...prev, { name, handle: null }];
+        });
+        
         content = await (handle as File).text();
         setActiveHandle(null);
       }
@@ -185,6 +198,26 @@ function App() {
     } catch (err) {
       console.error('Error reading file:', err);
     }
+  };
+
+  const closeTab = (index: number) => {
+    setTabs(prev => {
+      const next = [...prev];
+      const removed = next.splice(index, 1)[0];
+      if (removed && removed.name === activeFile) {
+        // If we closed the active tab, switch to another or welcome
+        if (next.length > 0) {
+          const newTab = next[next.length - 1];
+          if (newTab.handle) handleFileSelect(newTab.handle);
+          else setActiveFile(newTab.name);
+        } else {
+          setActiveFile('Welcome');
+          setActiveHandle(null);
+          setCode('// Welcome to 7Coder Desktop\n// Open a folder in the Explorer to get started!');
+        }
+      }
+      return next;
+    });
   };
 
   return (
@@ -239,7 +272,12 @@ function App() {
               <div className="flex-1 overflow-hidden">
                 <Explorer onFileSelect={handleFileSelect} onRootLoaded={setRootHandle} />
               </div>
-              <AIHarness rootHandle={rootHandle} onFileEdit={handleFileSelect} />
+              <AIHarness 
+                rootHandle={rootHandle} 
+                onFileEdit={handleFileSelect} 
+                tabs={tabs}
+                onCloseTab={closeTab}
+              />
             </div>
           )}
 

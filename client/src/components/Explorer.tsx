@@ -15,7 +15,7 @@ interface ExplorerProps {
   onRootLoaded: (handle: FileSystemDirectoryHandle) => void;
 }
 
-export function Explorer({ onFileSelect }: ExplorerProps) {
+export function Explorer({ onFileSelect, onRootLoaded }: ExplorerProps) {
   const [rootNode, setRootNode] = useState<FileNode | null>(null);
   const [isFileSystemSupported] = useState('showDirectoryPicker' in window);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -82,6 +82,8 @@ export function Explorer({ onFileSelect }: ExplorerProps) {
     });
 
     setRootNode(root);
+    // Even without full FileSystemHandle, we notify App of the root structure
+    onRootLoaded(null as any); 
   };
 
   const loadDirectory = async (node: FileNode) => {

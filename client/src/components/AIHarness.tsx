@@ -14,16 +14,21 @@ type Mode = 'chat' | 'settings' | 'terminal';
 interface AIHarnessProps {
   rootHandle: FileSystemDirectoryHandle | null;
   onFileEdit: (handle: FileSystemFileHandle) => void;
+  tabs: { name: string, handle: FileSystemFileHandle | null }[];
+  onCloseTab: (index: number) => void;
 }
 
-export function AIHarness({ rootHandle, onFileEdit }: AIHarnessProps) {
+export function AIHarness({ rootHandle, onFileEdit, tabs, onCloseTab }: AIHarnessProps) {
   const [mode, setMode] = useState<Mode>('chat');
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: "Hello! I am your 7Coder Agent. I can now read and edit your workspace autonomously. How can I assist you today?" }
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [terminalInput, setTerminalInput] = useState('');
+  const [terminalHistory, setTerminalHistory] = useState<{ type: 'cmd' | 'out', text: string }[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const termScrollRef = useRef<HTMLDivElement>(null);
 
   // Settings
   const [baseUrl, setBaseUrl] = useState(localStorage.getItem('7coder_ai_url') || 'http://localhost:11434/v1');
@@ -36,6 +41,12 @@ export function AIHarness({ rootHandle, onFileEdit }: AIHarnessProps) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, loading]);
+
+  useEffect(() => {
+    if (termScrollRef.current) {
+      termScrollRef.current.scrollTop = termScrollRef.current.scrollHeight;
+    }
+  }, [terminalHistory]);
 
   const saveSettings = () => {
     localStorage.setItem('7coder_ai_url', baseUrl);
@@ -88,6 +99,146 @@ export function AIHarness({ rootHandle, onFileEdit }: AIHarnessProps) {
   }
 
   // --- AGENT LOOP ---
+
+  // --- TERMINAL COMMANDS ---
+
+  const runCommand = async (input: string, stdin?: string): Promise<string> => {
+    const [cmd, ...args] = input.split(' ').filter(Boolean);
+    if (!cmd) return stdin || '';
+
+    try {
+      switch (cmd) {
+        case 'status':
+          return `Workspace: ${rootHandle ? 'Connected' : 'Disconnected'}
+Tabs Open: ${tabs.length}
+Current Active: ${tabs.length > 0 ? tabs[tabs.length-1].name : 'None'}`;
+        case 'help':
+          return `Available commands:
+  ls                     - List files in workspace
+  cat <file>             - Print file content (or stdin)
+  grep <pattern> [file]  - Search for pattern
+  echo <text>            - Print text
+  open <file>            - Open file in editor
+  kill <id>              - Close tab by index
+  pids / get-tab-ids     - List open tabs
+  status                 - Show environment status
+  help                   - Show this help
+  
+Supports: | (pipe), > (redirect to file), < (read from file)`;
+
+        case 'ls':
+          return await listFiles();
+
+        case 'cat':
+          if (args[0]) return await readFile(args[0]);
+          return stdin || '';
+
+        case 'echo':
+          return args.join(' ') || stdin || '';
+
+        case 'grep': {
+          if (!args[0]) return "Usage: grep <pattern> [filename]";
+          const pattern = args[0];
+          let content = '';
+          if (args[1]) {
+            content = await readFile(args[1]);
+          } else {
+            content = stdin || '';
+          }
+          
+          if (content.startsWith('Error')) return content;
+          const lines = content.split('\n');
+          const matches = lines.filter(line => line.includes(pattern));
+          return matches.length > 0 ? matches.join('\n') : "No matches found.";
+        }
+
+        case 'open': {
+          if (!args[0]) return "Usage: open <filename>";
+          if (!rootHandle) return "No workspace opened.";
+          const handle = await rootHandle.getFileHandle(args[0]);
+          onFileEdit(handle);
+          return `Opened ${args[0]}`;
+        }
+
+        case 'kill': {
+          const id = parseInt(args[0]);
+          if (isNaN(id) || id < 0 || id >= tabs.length) {
+            return `Invalid tab ID: ${args[0]}`;
+          }
+          const name = tabs[id].name;
+          onCloseTab(id);
+          return `Closed tab ${id} (${name})`;
+        }
+
+        case 'pids':
+        case 'get-tab-ids': {
+          const tabData = tabs.reduce((acc, tab, idx) => {
+            acc[idx] = tab.name;
+            return acc;
+          }, {} as any);
+          return JSON.stringify(tabData, null, 2);
+        }
+
+        default:
+          return `Command not found: ${cmd}`;
+      }
+    } catch (err: any) {
+      return `Error: ${err.message}`;
+    }
+  };
+
+  const executeTerminalCommand = async () => {
+    if (!terminalInput.trim()) return;
+    
+    const rawInput = terminalInput.trim();
+    setTerminalHistory(prev => [...prev, { type: 'cmd', text: `$ ${rawInput}` }]);
+    setTerminalInput('');
+
+    try {
+      // Split by pipes
+      const pipeParts = rawInput.split('|').map(s => s.trim());
+      let currentStdin = '';
+      let lastResult = '';
+
+      for (let i = 0; i < pipeParts.length; i++) {
+        let part = pipeParts[i];
+        let outputFile = '';
+        let inputFile = '';
+
+        // Handle output redirection >
+        if (part.includes('>')) {
+          const subParts = part.split('>');
+          part = subParts[0].trim();
+          outputFile = subParts[1].trim();
+        }
+
+        // Handle input redirection < (only for first command in pipe)
+        if (i === 0 && part.includes('<')) {
+          const subParts = part.split('<');
+          part = subParts[0].trim();
+          inputFile = subParts[1].trim();
+          currentStdin = await readFile(inputFile);
+        }
+
+        const result = await runCommand(part, currentStdin);
+        
+        if (outputFile) {
+          const writeRes = await writeFile(outputFile, result);
+          lastResult = writeRes;
+          currentStdin = ''; // Output redirected, next command gets nothing or we break?
+        } else {
+          lastResult = result;
+          currentStdin = result; // Pass to next command
+        }
+      }
+
+      if (lastResult) {
+        setTerminalHistory(prev => [...prev, { type: 'out', text: lastResult }]);
+      }
+    } catch (err: any) {
+      setTerminalHistory(prev => [...prev, { type: 'out', text: `Terminal Error: ${err.message}` }]);
+    }
+  };
 
   const callAgent = async (userQuery: string) => {
     if (!input.trim() && !userQuery) return;
@@ -294,17 +445,32 @@ export function AIHarness({ rootHandle, onFileEdit }: AIHarnessProps) {
         )}
 
         {mode === 'terminal' && (
-          <div className="h-full bg-black font-mono text-[11px] p-3 overflow-y-auto text-green-500/90 leading-relaxed">
-            <div className="flex items-center text-gray-600 mb-2 border-b border-gray-900 pb-1 uppercase tracking-tighter">
-              <Terminal className="w-3 h-3 mr-1" /> Agentic Process Output
+          <div className="h-full bg-black flex flex-col font-mono text-[11px] text-green-500/90 overflow-hidden">
+            <div className="p-2 border-b border-gray-900 flex items-center text-gray-600 uppercase tracking-tighter shrink-0 bg-[#0a0a0a]">
+              <Terminal className="w-3 h-3 mr-1" /> Limited Terminal Environment
             </div>
-            {messages.filter(m => m.role === 'tool').map((m, i) => (
-              <div key={i} className="mb-2">
-                <span className="text-blue-500">[{new Date().toLocaleTimeString()}]</span> <span className="text-yellow-500">TOOL_CALL:</span> {m.name}
-                <pre className="mt-1 text-gray-400 whitespace-pre-wrap pl-4 border-l border-gray-800">{m.content}</pre>
-              </div>
-            ))}
-            {loading && <div className="animate-pulse">_</div>}
+            
+            <div ref={termScrollRef} className="flex-1 p-3 overflow-y-auto space-y-1.5 scrollbar-thin">
+              {terminalHistory.map((line, i) => (
+                <div key={i} className={line.type === 'cmd' ? 'text-blue-400 font-bold' : 'text-gray-300 whitespace-pre-wrap pl-2'}>
+                  {line.text}
+                </div>
+              ))}
+              {loading && <div className="animate-pulse">_</div>}
+            </div>
+
+            <div className="p-2 bg-[#0a0a0a] border-t border-gray-900 flex items-center">
+              <span className="text-blue-500 mr-2 font-bold">$</span>
+              <input 
+                type="text" 
+                value={terminalInput}
+                onChange={(e) => setTerminalInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && executeTerminalCommand()}
+                placeholder="Enter command..."
+                className="flex-1 bg-transparent border-none outline-none text-green-400 placeholder-gray-800"
+                autoFocus
+              />
+            </div>
           </div>
         )}
       </div>
