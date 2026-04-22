@@ -102,8 +102,37 @@ export function AIHarness({ rootHandle, onFileEdit, tabs, onCloseTab }: AIHarnes
 
   // --- TERMINAL COMMANDS ---
 
+  const parseArgs = (input: string): string[] => {
+    const args: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    let quoteChar = '';
+
+    for (let i = 0; i < input.length; i++) {
+      const char = input[i];
+      if ((char === '"' || char === "'") && (!inQuotes || char === quoteChar)) {
+        if (inQuotes) {
+          inQuotes = false;
+          quoteChar = '';
+        } else {
+          inQuotes = true;
+          quoteChar = char;
+        }
+      } else if (char === ' ' && !inQuotes) {
+        if (current) args.push(current);
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    if (current) args.push(current);
+    return args;
+  };
+
   const runCommand = async (input: string, stdin?: string): Promise<string> => {
-    const [cmd, ...args] = input.split(' ').filter(Boolean);
+    const allArgs = parseArgs(input);
+    const cmd = allArgs[0];
+    const args = allArgs.slice(1);
     if (!cmd) return stdin || '';
 
     try {
@@ -137,18 +166,36 @@ Supports: | (pipe), > (redirect to file), < (read from file)`;
           return args.join(' ') || stdin || '';
 
         case 'grep': {
-          if (!args[0]) return "Usage: grep <pattern> [filename]";
-          const pattern = args[0];
+          let pattern = '';
+          let targetFile = '';
+          let ignoreCase = false;
+          
+          const filteredArgs = args.filter(a => {
+            if (a === '-i') {
+              ignoreCase = true;
+              return false;
+            }
+            return true;
+          });
+
+          if (filteredArgs.length === 0) return "Usage: grep [-i] <pattern> [filename]";
+          pattern = filteredArgs[0];
+          targetFile = filteredArgs[1] || '';
+
           let content = '';
-          if (args[1]) {
-            content = await readFile(args[1]);
+          if (targetFile) {
+            content = await readFile(targetFile);
           } else {
             content = stdin || '';
           }
           
           if (content.startsWith('Error')) return content;
           const lines = content.split('\n');
-          const matches = lines.filter(line => line.includes(pattern));
+          const matches = lines.filter(line => {
+            const lineToSearch = ignoreCase ? line.toLowerCase() : line;
+            const patternToSearch = ignoreCase ? pattern.toLowerCase() : pattern;
+            return lineToSearch.includes(patternToSearch);
+          });
           return matches.length > 0 ? matches.join('\n') : "No matches found.";
         }
 
@@ -288,6 +335,20 @@ Supports: | (pipe), > (redirect to file), < (read from file)`;
             required: ["filename", "content"]
           }
         }
+      },
+      {
+        type: "function",
+        function: {
+          name: "run_terminal_command",
+          description: "Run a command in the limited terminal environment (supports ls, grep, cat, echo, pipes, redirection)",
+          parameters: {
+            type: "object",
+            properties: {
+              command: { type: "string", description: "The command line to execute" }
+            },
+            required: ["command"]
+          }
+        }
       }
     ];
 
@@ -323,6 +384,7 @@ Supports: | (pipe), > (redirect to file), < (read from file)`;
             if (name === "list_files") result = await listFiles();
             else if (name === "read_file") result = await readFile(args.filename);
             else if (name === "write_file") result = await writeFile(args.filename, args.content);
+            else if (name === "run_terminal_command") result = await runCommand(args.command);
 
             currentMessages.push({
               role: 'tool',
