@@ -27,14 +27,16 @@ I structured the application as a single Node.js Express server. It natively ser
 - _Note: To use true vibe coding, you'll simply plug in your Ollama or OpenRouter endpoints in the actual request logic!_
 
 ### 5. Secure Quick.DB Sync & E2E Encryption
+
 - **Auth Modal**: Replaced unreliable prompts with a custom secure authentication dialog.
 - **E2E Encryption**: Implemented **PBKDF2 + AES-GCM** encryption. All your synced settings and data are encrypted locally using your master password before being sent to the server. The server only sees encrypted blobs!
 - **Node.js Quick.DB**: Syncs encrypted data to the backend database.
 
 ### 6. UI, Safari Compatibility & Licensing
+
 - **Safari Fallback**: Added a `webkitdirectory` fallback for opening folders in browsers that don't support the Native File System API (like Safari and Firefox).
 - **Rich Aesthetics**: Vibrant, Tailwind-powered dark theme with gradient branding.
-- **License**: MIT License included in the root.
+- **License**: SPL-R5 License included in the root.
 
 ## How to Test
 
